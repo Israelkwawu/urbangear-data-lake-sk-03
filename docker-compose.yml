@@ -1,0 +1,162 @@
+# SK-03 local batch data platform
+# Start:  docker compose up -d
+# Stop:   docker compose stop          (keeps everything)
+# Remove: docker compose down          (keeps data volumes)
+# Reset:  docker compose down -v       (DELETES all data volumes)
+
+x-airflow-common: &airflow-common
+  build: ./docker
+  image: sk03-airflow:2.9.3
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+    # Encrypts passwords stored in Airflow Connections. LOCAL LAB VALUE ONLY —
+    # in production this comes from a secrets manager, never a file in git.
+    AIRFLOW__CORE__FERNET_KEY: "iXv35_nnQa1h2LIZoCvO_QmRtEMiPgBQmE1_DBcprSE="
+    AIRFLOW__WEBSERVER__SECRET_KEY: "sk03-local-lab-only"
+    # MinIO credentials (S3 stand-in) — local lab values only
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin123
+    # Analytics warehouse (Postgres) — used by dbt and the load step
+    WAREHOUSE_HOST: warehouse
+    WAREHOUSE_PORT: "5432"
+    WAREHOUSE_DB: warehouse
+    WAREHOUSE_USER: dwh_user
+    WAREHOUSE_PASSWORD: dwh_pass
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./jobs:/opt/airflow/jobs
+    - ./dbt:/opt/airflow/dbt
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+
+services:
+
+  # MinIO — S3-compatible object storage (local stand-in for Amazon S3).
+  # API on 9000 (what code talks to), web console on 9001 (what YOU use).
+  # Image note: MinIO no longer publishes images on Docker Hub, and Bitnami moved
+  # its free images to "bitnamilegacy/*" (frozen: no more updates or patches).
+  # A frozen, pinned image is fine for a local lab — never for production.
+  minio:
+    image: bitnamilegacy/minio:2025.4.22
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio-data:/bitnami/minio/data
+
+  # Airflow's own metadata database (DAG runs, task states, connections).
+  airflow-db:
+    image: postgres:16
+    container_name: airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # The analytics WAREHOUSE (local stand-in for Amazon Redshift).
+  # Host port 5433 so it never clashes with a Postgres on 5432 (e.g. SK-02's).
+  # sql/warehouse_init.sql runs once, the first time the volume is created.
+  warehouse:
+    image: postgres:16
+    container_name: warehouse
+    environment:
+      POSTGRES_USER: dwh_user
+      POSTGRES_PASSWORD: dwh_pass
+      POSTGRES_DB: warehouse
+    ports:
+      - "5433:5432"
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+      - ./sql/warehouse_init.sql:/docker-entrypoint-initdb.d/01_warehouse_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dwh_user -d warehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Spark standalone cluster (master + 1 worker) — used to learn the cluster
+  # model and the Spark UI. Pipeline jobs run in local mode inside Airflow.
+  spark-master:
+    image: bitnamilegacy/spark:3.5
+    container_name: spark-master
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "8081:8080"   # Spark master UI (8081 on your PC; Airflow owns 8080)
+      - "7077:7077"
+    volumes:
+      - ./jobs:/opt/jobs
+
+  spark-worker:
+    image: bitnamilegacy/spark:3.5
+    container_name: spark-worker
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: "2"
+    depends_on:
+      - spark-master
+    volumes:
+      - ./jobs:/opt/jobs
+
+  # Airflow: one-time init, then webserver (UI on 8080) and scheduler.
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@example.com || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  minio-data:
+  airflow-db-data:
+  warehouse-data:

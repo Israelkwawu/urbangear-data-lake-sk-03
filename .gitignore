@@ -1,0 +1,12 @@
+# Airflow writes run logs into this bind mount; keep the folder, ignore the files.
+logs/*
+!logs/.gitkeep
+
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.egg-info/
+dbt/urbangear/target/
+dbt/urbangear/dbt_packages/
+dbt/urbangear/logs/
