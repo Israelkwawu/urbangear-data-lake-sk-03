@@ -60,7 +60,7 @@ July 1 has 15 corrupt lines. Its first record is order `ORD-20260701-00000`, pro
 
 Spark agrees. An explicit PERMISSIVE read of that file returns 1,968 lines and, after the DataFrame is cached, 15 corrupt rows. Letting Spark infer the schema instead types `order_date` as a string and `quantity` as `long`. Details are in [Spark job](spark.md).
 
-Each normal day is about 1,000 orders and about 2,000 lines, because each order samples one to three of the six products. July 5 is the day that should fail the 5% quality gate.
+Each normal day is about 1,000 orders and about 2,000 lines, because each order samples one to three of the six products. After quality routing, the four normal days reject about 3% of lines. July 5 rejects 11.78% (236 of 2,004), which is the day that should fail the 5% quality gate. The split is in [Spark job](spark.md).
 
 Regenerate from the scheduler, where `MINIO_ENDPOINT` is set:
 

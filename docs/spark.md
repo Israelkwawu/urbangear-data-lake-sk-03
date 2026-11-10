@@ -1,6 +1,6 @@
 # Spark job
 
-`jobs/etl_job.py` is the start of the daily transform. It has logging, `PipelineConfig`, `RAW_ORDER_SCHEMA`, and `create_spark_session()`. Later labs add the quality flags, the Parquet writes, and the metrics file. The imports it does not use yet stay in the file so that growth does not reshuffle the top of the module.
+`jobs/etl_job.py` reads one day, checks that enough rows arrived, and tags every line as clean or rejected. It does not yet write Parquet or the metrics file. Imports that those later steps need stay at the top of the file.
 
 The daily job runs in local mode inside `airflow-scheduler`: driver and executors are one process. The same function on AWS Glue skips the MinIO block, because `MINIO_ENDPOINT` is unset, and Spark uses the real S3 endpoint with an IAM role. Paths in the config use `s3a://`. Glue accepts `s3://`. Open-source Spark needs `s3a://`.
 
@@ -38,7 +38,41 @@ The explicit read, in PERMISSIVE mode, kept source order. `order_date` is a time
 
 A filter on `_corrupt_record` alone fails. Spark refuses a query that touches only the corrupt-record column on a raw JSON scan, because it would skip parsing. Cache the DataFrame first. After `cache()`, July 1 has **15** corrupt lines, the same count as the plain Python read. Other columns on those rows are null. The original text is in `_corrupt_record`.
 
-`groupBy("platform")` is a shuffle. `explain()` shows two `Exchange` operators and `hashpartitioning(..., 8)`, which is `SHUFFLE_PARTITIONS`. `AdaptiveSparkPlan` means AQE is on. `InMemoryTableScan` means the second action read the cache. The raw platform values are still messy: `website` (640), `marketplace` (555), `mobile_app` (538), plus ` Website ` (80), ` Marketplace ` (63), ` Mobile_App ` (62), `fax` (15), and null (15). The next lab trims and lowercases before it decides a platform is invalid.
+`groupBy("platform")` is a shuffle. `explain()` shows two `Exchange` operators and `hashpartitioning(..., 8)`, which is `SHUFFLE_PARTITIONS`. `AdaptiveSparkPlan` means AQE is on. `InMemoryTableScan` means the second action read the cache. The raw platform values are still messy: `website` (640), `marketplace` (555), `mobile_app` (538), plus ` Website ` (80), ` Marketplace ` (63), ` Mobile_App ` (62), `fax` (15), and null (15).
+
+## Quality flags and routing
+
+`extract_raw_data(spark, process_date)` builds `raw/orders/dt=<date>/` from the argument, never from today's date, so a rerun of an old day reads that day. The read is PERMISSIVE and ends in `cache()`, which is what lets later steps query `_corrupt_record`. If the count is below `MIN_RECORD_COUNT` (1,000 here), the function raises `ValueError`. A day of 50 lines that "succeeds" would look like a sales collapse. Raising the threshold to 5,000 against 1 July aborts with `Record count 1,968 is below the minimum threshold 5,000`.
+
+`tag_and_route` adds a boolean column per rule, then one `_is_rejected` column, then `rejection_reason`. Both outputs filter on that same column, so a row cannot land in both or in neither.
+
+A comparison with null is null, not false. `quantity <= 0` is null when quantity is null, and a filter keeps a row only when the condition is true, so that row would disappear from both outputs. Each comparison is wrapped in `coalesce(..., false)`. A missing platform is treated as invalid, so that flag defaults to true. `isNull()` is already true or false, so the critical-null flag does not need coalesce.
+
+`rejection_reason` uses the first matching rule. A corrupt line is also full of nulls, and the reason recorded for it is `corrupt_json`.
+
+Platforms are validated after `lower(trim(...))`, so `" Website "` stays. Only `fax` and a null platform are invalid.
+
+Verified split for 1 July: **1,909 clean + 59 rejected = 1,968**.
+
+| `rejection_reason` | Rows |
+|---|---:|
+| `corrupt_json` | 15 |
+| `future_order_date` | 15 |
+| `invalid_platform` | 15 |
+| `negative_quantity` | 2 |
+| `null_critical_field` | 12 |
+
+Clean platforms after normalisation: website 709, marketplace 609, mobile_app 591.
+
+| Date | Total | Clean | Rejected | Reject rate |
+|---|---:|---:|---:|---:|
+| 2026-07-01 | 1,968 | 1,909 | 59 | 3.00% |
+| 2026-07-02 | 1,989 | 1,924 | 65 | 3.27% |
+| 2026-07-03 | 2,004 | 1,950 | 54 | 2.69% |
+| 2026-07-04 | 2,000 | 1,933 | 67 | 3.35% |
+| 2026-07-05 | 2,004 | 1,768 | 236 | 11.78% |
+
+July 5 is above `MAX_REJECT_RATE` (5%). The Airflow gate that refuses to load it comes in a later lab. These functions only compute the split.
 
 ## Cluster job and the Spark UI
 

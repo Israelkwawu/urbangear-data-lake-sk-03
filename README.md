@@ -61,7 +61,7 @@ The warehouse is on host port **5433** so it does not collide with another Postg
 | `docker-compose.yml` | The platform: images, ports, env vars, volumes. |
 | `docker/Dockerfile` | Airflow plus Java, PySpark, the S3A JARs, and dbt. |
 | `sql/warehouse_init.sql` | Runs once, when the warehouse volume is first created. Creates `staging`, `analytics`, and `staging.daily_orders`. |
-| `jobs/` | Python and PySpark. `setup_buckets.py` and `generate_orders.py` load the lake. `etl_job.py` is the session, schema, and config. `lab02_agg.py` is the cluster UI example. |
+| `jobs/` | Python and PySpark. `setup_buckets.py` and `generate_orders.py` load the lake. `etl_job.py` reads a day and routes clean rows from rejected ones. `lab02_agg.py` is the cluster UI example. |
 | `dags/` | Airflow DAGs. Bind-mounted to `/opt/airflow/dags`. |
 | `dbt/` | dbt project and profiles. |
 | `logs/` | Airflow logs. Gitignored. |
