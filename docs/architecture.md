@@ -98,7 +98,7 @@ Named volumes (`minio-data`, `airflow-db-data`, `warehouse-data`) keep buckets a
 
 ## Daily pipeline
 
-This is the target flow. The lake, the warehouse table, and the Spark read-and-route functions exist now. `jobs/etl_job.py` extracts one day, aborts when the file is far too small, and tags every line clean or rejected. It does not yet write Parquet or emit metrics. The DAG, the quality gate, and the dbt models are still later labs. Counts and the flag rules are in [Spark job](spark.md).
+This is the target flow. The lake, the warehouse table, and the Spark job through partitioned writes exist now. `jobs/etl_job.py` extracts one day, aborts when the file is far too small, tags every line clean or rejected, and writes Parquet plus `metrics.json` for 2026-07-01 through 2026-07-04. July 5 stays in `raw/` until the quality-gate lab. The DAG, the quality gate, and the dbt models are still later labs. Counts, the window, and the flag rules are in [Spark job](spark.md).
 
 ```mermaid
 flowchart TD

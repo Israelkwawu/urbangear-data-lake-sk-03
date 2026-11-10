@@ -204,3 +204,163 @@ def tag_and_route(df: DataFrame, process_date: str) -> tuple[DataFrame, DataFram
 
     logger.info(f"[QUALITY] Clean: {clean_df.count():,} | Rejected: {rejected_df.count():,}")
     return clean_df, rejected_df
+
+
+# ── Transform ───────────────────────────────────────────────────
+def transform_clean(df: DataFrame, process_date: str) -> DataFrame:
+    """Apply business transformations to clean records."""
+    window_order = Window.partitionBy("order_id")
+
+    return (
+        df
+        # Calculated revenue measures
+        .withColumn("gross_revenue",
+            F.round(F.col("quantity") * F.col("unit_price"), 2))
+        .withColumn("discount_amount",
+            F.round(
+                F.col("gross_revenue") * F.coalesce(F.col("discount_pct"), F.lit(0.0)) / 100,
+                2
+            ))
+        .withColumn("net_revenue",
+            F.round(F.col("gross_revenue") - F.col("discount_amount"), 2))
+        .withColumn("total_amount",
+            F.round(
+                F.col("net_revenue")
+                + F.coalesce(F.col("shipping_cost"), F.lit(0.0))
+                + F.coalesce(F.col("tax_amount"),    F.lit(0.0)),
+                2
+            ))
+        # Standardize text fields
+        .withColumn("platform",          F.lower(F.trim(F.col("platform"))))
+        .withColumn("payment_method",    F.upper(F.trim(F.col("payment_method"))))
+        .withColumn("shipping_country",  F.upper(F.trim(F.col("shipping_country"))))
+        # Date parts for partitioning
+        .withColumn("order_year",  F.year(F.col("order_date")))
+        .withColumn("order_month", F.month(F.col("order_date")))
+        .withColumn("order_day",   F.dayofmonth(F.col("order_date")))
+        .withColumn("order_hour",  F.hour(F.col("order_date")))
+        .withColumn("day_of_week", F.dayofweek(F.col("order_date")))
+        .withColumn("is_weekend",  F.col("day_of_week").isin(1, 7))
+        # Order-level aggregates via window (no groupBy needed)
+        .withColumn("order_item_count",
+            F.count("*").over(window_order))
+        .withColumn("order_total_revenue",
+            F.round(F.sum("net_revenue").over(window_order), 2))
+        .withColumn("is_high_value",
+            F.col("order_total_revenue") > PipelineConfig.MAX_ORDER_VALUE)
+        # ETL metadata
+        .withColumn("etl_processed_at",  F.current_timestamp())
+        .withColumn("etl_process_date",  F.lit(process_date).cast("date"))
+        # Drop internal flag columns
+        .drop("_null_critical", "_negative_qty", "_future_date",
+              "_invalid_platform", "_corrupt_json", "_is_rejected",
+              "_corrupt_record", "rejection_reason")
+    )
+
+
+# ── Metrics and write ───────────────────────────────────────────
+def collect_metrics(raw_df: DataFrame, clean_df: DataFrame,
+                    rejected_df: DataFrame, process_date: str) -> dict:
+    """
+    Collect quality metrics and return them as a dict.
+    This dict is written as a JSON "sidecar" file and read by the
+    Airflow quality gate task to decide whether to proceed or abort.
+    """
+    total    = raw_df.count()
+    clean    = clean_df.count()
+    rejected = rejected_df.count()
+
+    # Per-rule rejection counts (each rejected row counted once, by its reason)
+    rule_counts = {
+        row["rejection_reason"]: row["count"]
+        for row in rejected_df.groupBy("rejection_reason").count().collect()
+    }
+
+    metrics = {
+        "process_date":   process_date,
+        "total_count":    total,
+        "clean_count":    clean,
+        "rejected_count": rejected,
+        "reject_rate":    round(rejected / total, 4) if total > 0 else 0.0,
+        "rule_counts":    dict(sorted(rule_counts.items())),
+        "generated_at":   datetime.now().isoformat(),
+    }
+    logger.info(f"[METRICS] {metrics}")
+    return metrics
+
+
+def write_outputs(clean_df: DataFrame, rejected_df: DataFrame,
+                  metrics: dict, process_date: str) -> None:
+    """Write clean records, rejected records, and metrics to the data lake."""
+    # Clean records: partitioned Parquet. With partitionOverwriteMode=dynamic,
+    # "overwrite" replaces ONLY the partitions present in clean_df.
+    (
+        clean_df
+        .repartition(F.col("order_year"), F.col("order_month"), F.col("order_day"))
+        .write
+        .mode("overwrite")
+        .partitionBy("order_year", "order_month", "order_day")
+        .parquet(f"{PipelineConfig.S3_PROCESSED}/orders/")
+    )
+    logger.info(f"[WRITE] Clean data written to {PipelineConfig.S3_PROCESSED}/orders/")
+
+    # Rejected records: one flat folder per run date, for investigation
+    n_rejected = rejected_df.count()
+    if n_rejected > 0:
+        (
+            rejected_df
+            .coalesce(1)
+            .write
+            .mode("overwrite")
+            .parquet(f"{PipelineConfig.S3_REJECTED}/orders/dt={process_date}/")
+        )
+        logger.info(f"[WRITE] {n_rejected:,} rejected records written to dead-letter")
+
+    # Metrics sidecar (read by the Airflow quality gate) — written with boto3.
+    # MINIO_ENDPOINT is set locally; on AWS it is absent and boto3 uses real S3.
+    metrics_key = f"metrics/orders/dt={process_date}/metrics.json"
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ.get("MINIO_ENDPOINT"),
+        aws_access_key_id=os.environ.get("MINIO_ACCESS_KEY"),
+        aws_secret_access_key=os.environ.get("MINIO_SECRET_KEY"),
+    )
+    s3.put_object(Bucket=PipelineConfig.S3_BUCKET, Key=metrics_key,
+                  Body=json.dumps(metrics, indent=2))
+    logger.info(f"[WRITE] Quality metrics written to s3://{PipelineConfig.S3_BUCKET}/{metrics_key}")
+
+
+# ── Main ────────────────────────────────────────────────────────
+def main(process_date: str) -> None:
+    logger.info("=" * 60)
+    logger.info("URBANGEAR DAILY SALES ETL")
+    logger.info(f"Processing date: {process_date}")
+    logger.info(f"Started: {datetime.now().isoformat()}")
+    logger.info("=" * 60)
+
+    spark = create_spark_session("urbangear_daily_sales_etl")
+
+    try:
+        raw_df                = extract_raw_data(spark, process_date)
+        clean_df, rejected_df = tag_and_route(raw_df, process_date)
+        transformed_df        = transform_clean(clean_df, process_date)
+        metrics               = collect_metrics(raw_df, transformed_df, rejected_df, process_date)
+        write_outputs(transformed_df, rejected_df, metrics, process_date)
+
+        logger.info("=" * 60)
+        logger.info(f"ETL COMPLETE — {process_date}")
+        logger.info(f"Clean: {metrics['clean_count']:,} | Rejected: {metrics['rejected_count']:,} "
+                    f"| Rate: {metrics['reject_rate']:.2%}")
+        logger.info("=" * 60)
+    finally:
+        spark.stop()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # Required on purpose: a batch job must be a pure function of its date.
+    # Never default to "yesterday" — backfills and retries need explicit dates.
+    parser.add_argument("--process_date", required=True, help="YYYY-MM-DD")
+    # parse_known_args: AWS Glue adds its own arguments (e.g. --JOB_NAME); ignore them
+    args, _ = parser.parse_known_args()
+    main(args.process_date)

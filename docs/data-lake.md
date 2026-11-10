@@ -15,9 +15,9 @@ flowchart TB
 | Zone | Written by | Read by |
 |---|---|---|
 | `raw/` | `jobs/generate_orders.py` now. The source export in production. | The Spark job, and the Airflow sensor `raw/orders/dt={{ ds }}/part-*.json` |
-| `processed/` | Spark, in a later lab | The warehouse load |
-| `rejected/` | Spark | People debugging a bad day |
-| `metrics/` | Spark | Airflow's quality gate |
+| `processed/` | Spark, for 2026-07-01 through 2026-07-04 | The warehouse load, in a later lab |
+| `rejected/` | Spark, same four days | People debugging a bad day |
+| `metrics/` | Spark, same four days | Airflow's quality gate, in a later lab |
 
 Objects are immutable. A rerun replaces `part-00000.json` for that day; it does not append. Listing is a prefix query: every key that starts with `raw/orders/dt=2026-07-01/`. An empty prefix returns no `Contents` key. That is an empty day, not an error. More than 1,000 keys needs a paginator.
 
@@ -61,6 +61,21 @@ July 1 has 15 corrupt lines. Its first record is order `ORD-20260701-00000`, pro
 Spark agrees. An explicit PERMISSIVE read of that file returns 1,968 lines and, after the DataFrame is cached, 15 corrupt rows. Letting Spark infer the schema instead types `order_date` as a string and `quantity` as `long`. Details are in [Spark job](spark.md).
 
 Each normal day is about 1,000 orders and about 2,000 lines, because each order samples one to three of the six products. After quality routing, the four normal days reject about 3% of lines. July 5 rejects 11.78% (236 of 2,004), which is the day that should fail the 5% quality gate. The split is in [Spark job](spark.md).
+
+## Outputs already in the bucket
+
+`jobs/etl_job.py --process_date` has been run for 1–4 July, and 1 July was run a second time. Dynamic partition overwrite replaced that day's Parquet and left the other days in place.
+
+| Prefix | What is there |
+|---|---|
+| `processed/orders/order_year=2026/order_month=7/order_day=1/` | 1,909 clean lines, `is_weekend` false |
+| `processed/orders/order_year=2026/order_month=7/order_day=2/` | 1,924 clean lines, `is_weekend` false |
+| `processed/orders/order_year=2026/order_month=7/order_day=3/` | 1,950 clean lines, `is_weekend` false |
+| `processed/orders/order_year=2026/order_month=7/order_day=4/` | 1,933 clean lines, `is_weekend` true (Saturday) |
+| `rejected/orders/dt=2026-07-01/` through `dt=2026-07-04/` | One Parquet file per day: 59, 65, 54, and 67 rows |
+| `metrics/orders/dt=2026-07-01/metrics.json` through `dt=2026-07-04/` | `reject_rate` 0.03, 0.0327, 0.0269, 0.0335 |
+
+July 5 has a raw file and no processed, rejected, or metrics prefix. The quality-gate lab is the first run of that day.
 
 Regenerate from the scheduler, where `MINIO_ENDPOINT` is set:
 

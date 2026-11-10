@@ -1,6 +1,6 @@
 # Spark job
 
-`jobs/etl_job.py` reads one day, checks that enough rows arrived, and tags every line as clean or rejected. It does not yet write Parquet or the metrics file. Imports that those later steps need stay at the top of the file.
+`jobs/etl_job.py` reads one day, checks that enough rows arrived, tags every line as clean or rejected, computes revenue and an order-level window, and writes three outputs: partitioned Parquet, a dead-letter Parquet file, and `metrics.json`. `--process_date` is required.
 
 The daily job runs in local mode inside `airflow-scheduler`: driver and executors are one process. The same function on AWS Glue skips the MinIO block, because `MINIO_ENDPOINT` is unset, and Spark uses the real S3 endpoint with an IAM role. Paths in the config use `s3a://`. Glue accepts `s3://`. Open-source Spark needs `s3a://`.
 
@@ -72,7 +72,41 @@ Clean platforms after normalisation: website 709, marketplace 609, mobile_app 59
 | 2026-07-04 | 2,000 | 1,933 | 67 | 3.35% |
 | 2026-07-05 | 2,004 | 1,768 | 236 | 11.78% |
 
-July 5 is above `MAX_REJECT_RATE` (5%). The Airflow gate that refuses to load it comes in a later lab. These functions only compute the split.
+July 5 is above `MAX_REJECT_RATE` (5%). The Airflow gate that refuses to load it comes in a later lab. That day is still raw only. The four normal days below are the ones this job has written.
+
+## Transforms, windows, and writes
+
+`transform_clean` runs on the clean frame. Gross revenue is `quantity * unit_price`, rounded to cents. A null `discount_pct`, `shipping_cost`, or `tax_amount` becomes 0 before the arithmetic, so a missing discount is a full-price line. `platform` is lowercased and trimmed. `payment_method` and `shipping_country` are uppercased. Year, month, day, hour, and `day_of_week` come from `order_date`. Spark's `dayofweek` counts Sunday as 1 and Saturday as 7, and `is_weekend` is true for those two values. 4 July 2026 is a Saturday, so that day's clean rows have `is_weekend` true. 1–3 July are Wednesday through Friday.
+
+The window is `partitionBy("order_id")`. Every product line stays its own row and also receives `order_item_count` and `order_total_revenue`, the sum of `net_revenue` on that order. A `groupBy` would have collapsed the order to one row and lost the line grain `staging.daily_orders` expects. `is_high_value` is true when that order total exceeds `MAX_ORDER_VALUE` (50,000). `etl_processed_at` and `etl_process_date` stamp the run. The internal flags, `rejection_reason`, and `_corrupt_record` are dropped before the write.
+
+Order `ORD-20260701-00000` has three lines. Net revenue is 161.98, 122.85, and 29.71. All three rows show `order_item_count` 3 and `order_total_revenue` 314.54. Across 1 July, 344 orders have one line, 722 have two, and 843 have three. No order that day exceeds 50,000, so `is_high_value` is false on every clean line.
+
+`collect_metrics` counts the raw, clean, and rejected frames, rounds `reject_rate` to four decimals, and sorts the rejection reasons. That dict is the sidecar the later Airflow gate reads.
+
+`write_outputs` does three things:
+
+- Clean rows are repartitioned by year, month, and day, then overwritten as Parquet under `processed/orders/`. `partitionOverwriteMode=dynamic` replaces the partitions present in that DataFrame and leaves the other days in place. Running 1 July a second time left the four-day counts unchanged.
+- Rejected rows are coalesced to one file and overwritten under `rejected/orders/dt=<date>/`.
+- Metrics go to `metrics/orders/dt=<date>/metrics.json` through boto3. The log line prints an `s3://` URI because that is the key the gate will read. The client still uses `MINIO_ENDPOINT` when it is set.
+
+`--process_date` is required, and `parse_known_args` ignores extra arguments Glue adds, such as `--JOB_NAME`. Omitting the date prints usage and exits.
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec airflow-scheduler spark-submit \
+  --master "local[2]" /opt/airflow/jobs/etl_job.py --process_date 2026-07-01
+```
+
+After 1–4 July, and after the second run of 1 July:
+
+| `order_day` | `is_weekend` | Clean rows |
+|---:|---|---:|
+| 1 | false | 1,909 |
+| 2 | false | 1,924 |
+| 3 | false | 1,950 |
+| 4 | true | 1,933 |
+
+July 1 metrics: `reject_rate` 0.03, with the same five reason counts as the routing table above. July 2 is 0.0327 (65 rejected), July 3 is 0.0269 (54), July 4 is 0.0335 (67).
 
 ## Cluster job and the Spark UI
 
