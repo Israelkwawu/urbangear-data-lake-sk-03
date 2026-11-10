@@ -58,6 +58,8 @@ The generator also truncates some lines so they are not valid JSON. Those five p
 
 July 1 has 15 corrupt lines. Its first record is order `ORD-20260701-00000`, product Trail Backpack, platform `" Website "`.
 
+Spark agrees. An explicit PERMISSIVE read of that file returns 1,968 lines and, after the DataFrame is cached, 15 corrupt rows. Letting Spark infer the schema instead types `order_date` as a string and `quantity` as `long`. Details are in [Spark job](spark.md).
+
 Each normal day is about 1,000 orders and about 2,000 lines, because each order samples one to three of the six products. July 5 is the day that should fail the 5% quality gate.
 
 Regenerate from the scheduler, where `MINIO_ENDPOINT` is set:

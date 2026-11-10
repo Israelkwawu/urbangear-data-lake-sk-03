@@ -4,6 +4,7 @@
 |---|---|
 | [Architecture](architecture.md) | Which containers exist, how a sales day moves through them, and which AWS service each one stands in for. |
 | [Data lake](data-lake.md) | The bucket, the four zones, the JSON Lines contract, and the five days already loaded. |
+| [Spark job](spark.md) | The session settings, why the schema is explicit, and the cluster UI job. |
 | [Warehouse](warehouse.md) | `staging` and `analytics`, and the `daily_orders` landing table. |
 | [Operations](operations.md) | Start, stop, reset, hostnames, ports, and the failures that show up first. |
 

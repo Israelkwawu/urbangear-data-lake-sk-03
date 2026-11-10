@@ -43,8 +43,8 @@ flowchart LR
 | `minio` | `bitnamilegacy/minio:2025.4.22` | Object storage. API on 9000, console on 9001. |
 | `airflow-db` | `postgres:16` | Airflow metadata: runs, task state, connections. No host port. |
 | `warehouse` | `postgres:16` | Analytics database. Host port 5433 maps to 5432 inside the network. |
-| `spark-master` | `bitnamilegacy/spark:3.5` | Spark UI and master port 7077. For learning the cluster model. |
-| `spark-worker` | `bitnamilegacy/spark:3.5` | One worker, 2 cores, 2 GB. |
+| `spark-master` | `bitnamilegacy/spark:3.5` | Spark UI and master port 7077. Runs as root so `spark-submit` has a passwd name. See [Spark job](spark.md). |
+| `spark-worker` | `bitnamilegacy/spark:3.5` | One worker, 2 cores, 2 GB. Also runs as root, for the same reason. |
 | `airflow-init` | `sk03-airflow:2.9.3` | Migrates the Airflow database and creates user `admin`, then exits 0. |
 | `airflow-webserver` | `sk03-airflow:2.9.3` | The DAG UI. |
 | `airflow-scheduler` | `sk03-airflow:2.9.3` | Runs the tasks. Jobs, Spark, and dbt execute here. |
@@ -98,7 +98,7 @@ Named volumes (`minio-data`, `airflow-db-data`, `warehouse-data`) keep buckets a
 
 ## Daily pipeline
 
-This is the target flow. The lake and the warehouse table exist now. The Spark job, the DAG, the quality gate, and the dbt models are the later labs.
+This is the target flow. The lake, the warehouse table, and the Spark session factory exist now. `jobs/etl_job.py` declares the paths, the raw schema, and the session. It does not yet flag rows, write Parquet, or emit metrics. The DAG, the quality gate, and the dbt models are still later labs. Session settings and the read we verified are in [Spark job](spark.md).
 
 ```mermaid
 flowchart TD

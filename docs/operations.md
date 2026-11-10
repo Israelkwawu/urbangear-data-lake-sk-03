@@ -76,5 +76,6 @@ Expected: PySpark 3.5.1, dbt Core 1.8.10 with the postgres plugin 1.8.2, and `ht
 | Webserver keeps restarting | `airflow-init` failed | `docker compose logs airflow-init`, then `docker compose down` and `docker compose up -d` |
 | Line or byte counts differ from [Data lake](data-lake.md) | The generator or `--dirty_rate` changed | Use the script and the dates in that doc |
 | File locks while containers run | The project is inside OneDrive or a similar sync folder | Keep the repo on a normal disk path such as `C:\DataEngineering` |
+| `invalid null input: name` from `spark-submit` on `spark-master` | The container user has no passwd entry | Recreate the Spark services from this Compose file. They run as root and set `HADOOP_USER_NAME=spark`. See [Spark job](spark.md) |
 
 `docker compose ps` and `docker compose logs <service>` are the first two commands when a container is unhappy.

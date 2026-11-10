@@ -97,8 +97,14 @@ services:
   spark-master:
     image: bitnamilegacy/spark:3.5
     container_name: spark-master
+    # The image user is uid 1001 with no name in /etc/passwd. docker exec does
+    # not run the entrypoint, so nss_wrapper never assigns the name "spark".
+    # Hadoop then crashes with "invalid null input: name". Root has a passwd
+    # entry, so spark-submit from this container can read s3a://.
+    user: "0:0"
     environment:
       SPARK_MODE: master
+      HADOOP_USER_NAME: spark
     ports:
       - "8081:8080"   # Spark master UI (8081 on your PC; Airflow owns 8080)
       - "7077:7077"
@@ -108,9 +114,11 @@ services:
   spark-worker:
     image: bitnamilegacy/spark:3.5
     container_name: spark-worker
+    user: "0:0"
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077
+      HADOOP_USER_NAME: spark
       SPARK_WORKER_MEMORY: 2G
       SPARK_WORKER_CORES: "2"
     depends_on:
