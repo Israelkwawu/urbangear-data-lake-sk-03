@@ -62,6 +62,14 @@ MSYS_NO_PATHCONV=1 docker exec airflow-scheduler bash -c 'echo $MINIO_ENDPOINT $
 
 Expected: PySpark 3.5.1, dbt Core 1.8.10 with the postgres plugin 1.8.2, and `http://minio:9000 warehouse`. `spark-submit` may print `ps: command not found` while it looks up the process environment. The version banner after that line is the result that matters.
 
+Try the teaching DAG without the UI. It stays paused, so this command is the way to run it:
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec airflow-scheduler airflow dags test urbangear_hello 2026-07-01
+```
+
+Look for `[REPORT] date=2026-07-01 files=1` and `state=success`. The daily sales DAG is also paused. Both are described in [Airflow](airflow.md). The MinIO connection it uses is `aws_default`, stored in the Airflow database.
+
 ## When something fails
 
 | What you see | What it usually means | What to do |

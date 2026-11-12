@@ -15,9 +15,9 @@ flowchart TB
 | Zone | Written by | Read by |
 |---|---|---|
 | `raw/` | `jobs/generate_orders.py` now. The source export in production. | The Spark job, and the Airflow sensor `raw/orders/dt={{ ds }}/part-*.json` |
-| `processed/` | Spark, for 2026-07-01 through 2026-07-04 | The warehouse load, in a later lab |
-| `rejected/` | Spark, same four days | People debugging a bad day |
-| `metrics/` | Spark, same four days | Airflow's quality gate, in a later lab |
+| `processed/` | Spark, for 2026-07-01 through 2026-07-04 and 2026-07-06 | The warehouse load, in a later lab |
+| `rejected/` | Spark, those same days | People debugging a bad day |
+| `metrics/` | Spark, those same days | Airflow's quality gate, in a later lab |
 
 Objects are immutable. A rerun replaces `part-00000.json` for that day; it does not append. Listing is a prefix query: every key that starts with `raw/orders/dt=2026-07-01/`. An empty prefix returns no `Contents` key. That is an empty day, not an error. More than 1,000 keys needs a paginator.
 
@@ -55,6 +55,7 @@ The generator also truncates some lines so they are not valid JSON. Those five p
 | `raw/orders/dt=2026-07-03/part-00000.json` | 2,004 | 864,842 | 0.03 |
 | `raw/orders/dt=2026-07-04/part-00000.json` | 2,000 | 863,405 | 0.03 |
 | `raw/orders/dt=2026-07-05/part-00000.json` | 2,004 | 863,182 | 0.12 |
+| `raw/orders/dt=2026-07-06/part-00000.json` | 2,000 | 862,671 | 0.03 |
 
 July 1 has 15 corrupt lines. Its first record is order `ORD-20260701-00000`, product Trail Backpack, platform `" Website "`.
 
@@ -64,7 +65,7 @@ Each normal day is about 1,000 orders and about 2,000 lines, because each order 
 
 ## Outputs already in the bucket
 
-`jobs/etl_job.py --process_date` has been run for 1–4 July, and 1 July was run a second time. Dynamic partition overwrite replaced that day's Parquet and left the other days in place.
+`jobs/etl_job.py --process_date` has been run for 1–4 July and for 6 July. 1 July and 2 July were each run a second time. Dynamic partition overwrite replaced that day's Parquet and left the other days in place. 2 July stayed at 1,924 clean lines.
 
 | Prefix | What is there |
 |---|---|
@@ -72,8 +73,9 @@ Each normal day is about 1,000 orders and about 2,000 lines, because each order 
 | `processed/orders/order_year=2026/order_month=7/order_day=2/` | 1,924 clean lines, `is_weekend` false |
 | `processed/orders/order_year=2026/order_month=7/order_day=3/` | 1,950 clean lines, `is_weekend` false |
 | `processed/orders/order_year=2026/order_month=7/order_day=4/` | 1,933 clean lines, `is_weekend` true (Saturday) |
-| `rejected/orders/dt=2026-07-01/` through `dt=2026-07-04/` | One Parquet file per day: 59, 65, 54, and 67 rows |
-| `metrics/orders/dt=2026-07-01/metrics.json` through `dt=2026-07-04/` | `reject_rate` 0.03, 0.0327, 0.0269, 0.0335 |
+| `processed/orders/order_year=2026/order_month=7/order_day=6/` | 1,948 clean lines. The file arrived while the sensor was waiting |
+| `rejected/orders/dt=2026-07-01/` through `dt=2026-07-04/`, and `dt=2026-07-06/` | One Parquet file per day: 59, 65, 54, 67, and 52 rows |
+| `metrics/orders/dt=2026-07-01/metrics.json` through `dt=2026-07-04/`, and `dt=2026-07-06/` | `reject_rate` 0.03, 0.0327, 0.0269, 0.0335, and 0.0260 |
 
 July 5 has a raw file and no processed, rejected, or metrics prefix. The quality-gate lab is the first run of that day.
 

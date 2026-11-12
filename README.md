@@ -62,7 +62,7 @@ The warehouse is on host port **5433** so it does not collide with another Postg
 | `docker/Dockerfile` | Airflow plus Java, PySpark, the S3A JARs, and dbt. |
 | `sql/warehouse_init.sql` | Runs once, when the warehouse volume is first created. Creates `staging`, `analytics`, and `staging.daily_orders`. |
 | `jobs/` | Python and PySpark. `setup_buckets.py` and `generate_orders.py` load the lake. `etl_job.py` reads a day, routes clean rows from rejected ones, and writes partitioned Parquet, the dead-letter, and metrics. `lab02_agg.py` is the cluster UI example. |
-| `dags/` | Airflow DAGs. Bind-mounted to `/opt/airflow/dags`. |
+| `dags/` | Airflow DAGs, both paused. `urbangear_hello.py` is the teaching DAG. `urbangear_daily_sales_pipeline.py` waits for a day's file and runs the Spark job. |
 | `dbt/` | dbt project and profiles. |
 | `logs/` | Airflow logs. Gitignored. |
 | `plugins/`, `data/` | Airflow plugins and scratch files. |
@@ -85,4 +85,4 @@ Do not edit files under MinIO's data directory. Read and write only through the 
 
 ## Documentation
 
-Longer notes live in [docs](docs/README.md): [architecture](docs/architecture.md) (with diagrams), [data lake](docs/data-lake.md), [Spark job](docs/spark.md), [warehouse](docs/warehouse.md), and [operations](docs/operations.md).
+Longer notes live in [docs](docs/README.md): [architecture](docs/architecture.md) (with diagrams), [data lake](docs/data-lake.md), [Spark job](docs/spark.md), [Airflow](docs/airflow.md), [warehouse](docs/warehouse.md), and [operations](docs/operations.md).

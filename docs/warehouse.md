@@ -40,7 +40,7 @@ One row per order line, matching the Spark job's clean output. The raw JSON has 
 
 The load step deletes rows for the process date before inserting that day's Parquet. A rerun replaces the day.
 
-The Parquet for 1–4 July is in the lake. This table stays empty until the load lab copies a day in. Confirm the bootstrap with:
+The Parquet for 1–4 July and 6 July is in the lake. This table stays empty until the load lab copies a day in. Confirm the bootstrap with:
 
 ```bash
 docker exec warehouse psql -U dwh_user -d warehouse -c "\dn"

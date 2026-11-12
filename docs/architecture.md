@@ -98,7 +98,7 @@ Named volumes (`minio-data`, `airflow-db-data`, `warehouse-data`) keep buckets a
 
 ## Daily pipeline
 
-This is the target flow. The lake, the warehouse table, and the Spark job through partitioned writes exist now. `jobs/etl_job.py` extracts one day, aborts when the file is far too small, tags every line clean or rejected, and writes Parquet plus `metrics.json` for 2026-07-01 through 2026-07-04. July 5 stays in `raw/` until the quality-gate lab. The DAG, the quality gate, and the dbt models are still later labs. Counts, the window, and the flag rules are in [Spark job](spark.md).
+This is the target flow. The lake, the warehouse table, and the Spark job through partitioned writes exist now. `jobs/etl_job.py` extracts one day, aborts when the file is far too small, tags every line clean or rejected, and writes Parquet plus `metrics.json`. The daily sales DAG waits for that day's file and runs the job for 1–4 July and for 6 July. July 5 stays in `raw/` until the quality-gate lab. The quality gate, the warehouse load, and the dbt models are still later labs. Counts and the window are in [Spark job](spark.md). The DAGs are in [Airflow](airflow.md).
 
 ```mermaid
 flowchart TD
@@ -135,7 +135,7 @@ flowchart TD
 | Transform in SQL | dbt | `staging.daily_orders` | `analytics` marts, then `dbt test` |
 | Alert | Airflow task log locally; Slack in production | The run result | Record counts, or the failed task, date, and log link |
 
-July 5 is generated with `--dirty_rate 0.12` so the gate has a day that should stop. The other four days use the default 3% dirt and should pass.
+July 5 is generated with `--dirty_rate 0.12` so the gate has a day that should stop. 1–4 July and 6 July use the default 3% dirt and should pass.
 
 ## Local service and the AWS service it stands in for
 

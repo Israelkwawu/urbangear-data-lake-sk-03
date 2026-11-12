@@ -72,7 +72,7 @@ Clean platforms after normalisation: website 709, marketplace 609, mobile_app 59
 | 2026-07-04 | 2,000 | 1,933 | 67 | 3.35% |
 | 2026-07-05 | 2,004 | 1,768 | 236 | 11.78% |
 
-July 5 is above `MAX_REJECT_RATE` (5%). The Airflow gate that refuses to load it comes in a later lab. That day is still raw only. The four normal days below are the ones this job has written.
+July 5 is above `MAX_REJECT_RATE` (5%). The Airflow gate that refuses to load it comes in a later lab. That day is still raw only. The job has written 1–4 July and 6 July.
 
 ## Transforms, windows, and writes
 
@@ -106,7 +106,7 @@ After 1–4 July, and after the second run of 1 July:
 | 3 | false | 1,950 |
 | 4 | true | 1,933 |
 
-July 1 metrics: `reject_rate` 0.03, with the same five reason counts as the routing table above. July 2 is 0.0327 (65 rejected), July 3 is 0.0269 (54), July 4 is 0.0335 (67).
+July 1 metrics: `reject_rate` 0.03, with the same five reason counts as the routing table above. July 2 is 0.0327 (65 rejected), July 3 is 0.0269 (54), July 4 is 0.0335 (67). July 6, written by the daily sales DAG after its file arrived late, is 0.0260 (1,948 clean, 52 rejected).
 
 ## Cluster job and the Spark UI
 
